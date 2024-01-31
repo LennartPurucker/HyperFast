@@ -264,7 +264,7 @@ class HyperFastClassifier(BaseEstimator, ClassifierMixin):
         self._y_preds.append(y_pred)
 
     def fit(
-        self, X: np.ndarray | pd.DataFrame, y: np.ndarray | pd.Series
+        self, X: np.ndarray | pd.DataFrame, y: np.ndarray | pd.Series, cat_features: List[int] | None = None,
     ) -> HyperFastClassifier:
         """
         Generates a main model for the given data.
@@ -273,6 +273,8 @@ class HyperFastClassifier(BaseEstimator, ClassifierMixin):
             X (array-like): Input features.
             y (array-like): Target values.
         """
+        if cat_features is not None:
+            self.cat_features = cat_features
         seed_everything(self.seed)
         X, y = self._preprocess_fitting_data(X, y)
         self._initialize_fit_attributes()
@@ -367,6 +369,17 @@ class HyperFastClassifier(BaseEstimator, ClassifierMixin):
                             )
 
                 predicted = F.softmax(outputs, dim=1)
+                try:
+                    _subset_unique = np.unique(y_pred.cpu().numpy())
+                    np.testing.assert_array_equal(self.classes_, _subset_unique)
+                except AssertionError as e:
+                    import warnings
+                    warnings.warn(f"Predicted classes are not a subset of the training classes for this ensemble member. Fixing it. {e}", stacklevel=2)
+                    to_fill_pos = np.where(np.setdiff1d(self.classes_, _subset_unique) == self.classes_)[0]
+                    _predicted = predicted.cpu().numpy()
+                    for fill_pos in to_fill_pos:
+                        _predicted = np.insert(_predicted, fill_pos, 0, axis=1)
+                    predicted = torch.tensor(_predicted).to(self.device)
                 yhats.append(predicted)
 
             yhats = torch.stack(yhats)
